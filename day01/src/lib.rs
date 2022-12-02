@@ -72,14 +72,9 @@ pub fn part2(input: &Path) -> Result<(), Error> {
         .split("\n\n")
         .map(|e| e.parse::<Elf>())
         .collect::<Result<Vec<Elf>, Error>>()?;
-    elfs.sort_by_cached_key(Elf::total_calories_carried);
+    elfs.sort_by_cached_key(|e| std::cmp::Reverse(e.total_calories_carried()));
     let elfs = elfs;
-    let res: u32 = elfs
-        .iter()
-        .rev()
-        .take(3)
-        .map(Elf::total_calories_carried)
-        .sum();
+    let res: u32 = elfs.iter().take(3).map(Elf::total_calories_carried).sum();
     println!("p2: {}", res);
     Ok(())
 }
