@@ -28,20 +28,42 @@ impl FromStr for Elf {
                     .map_err(|e| Error::MalformedInput(e, s.to_owned()))
             })
             .collect::<Result<Vec<u32>, _>>()?;
-        Ok(Elf::new(items))
+        match items.len() {
+            0 => Err(Error::ElfWithNoSnacks),
+            _ => Ok(Elf::new(items)),
+        }
+    }
+}
+
+fn until_err<T, E>(err: &mut &mut Result<(), E>, item: Result<T, E>) -> Option<T> {
+    match item {
+        Ok(item) => Some(item),
+        Err(e) => {
+            **err = Err(e);
+            None
+        }
     }
 }
 
 pub fn part1(input: &Path) -> Result<(), Error> {
+    let mut err = Ok(());
     let res = std::fs::read_to_string(input)?
         .split("\n\n")
-        .map(|e| e.parse::<Elf>())
-        .collect::<Result<Vec<Elf>, Error>>()?
-        .into_iter()
-        .max_by_key(Elf::total_calories_carried)
-        .ok_or(Error::NoSolution)?
-        .total_calories_carried();
-    println!("{}", res);
+        .enumerate()
+        .map(|(i, e)| {
+            e.parse::<Elf>().map_err(|e| {
+                if let Error::ElfWithNoSnacks = e {
+                    Error::ElfWithNoSnacksNumbered(i)
+                } else {
+                    e
+                }
+            })
+        })
+        .scan(&mut err, until_err)
+        .max_by_key(Elf::total_calories_carried);
+    err?;
+    let res = res.ok_or(Error::NoSolution)?.total_calories_carried();
+    println!("p1: {}", res);
     Ok(())
 }
 
@@ -58,7 +80,7 @@ pub fn part2(input: &Path) -> Result<(), Error> {
         .take(3)
         .map(Elf::total_calories_carried)
         .sum();
-    println!("{}", res);
+    println!("p2: {}", res);
     Ok(())
 }
 
@@ -70,4 +92,8 @@ pub enum Error {
     NoSolution,
     #[error("malformed input: {1}")]
     MalformedInput(#[source] std::num::ParseIntError, String),
+    #[error("malformed input: elf with no snacks (0 calories)")]
+    ElfWithNoSnacks,
+    #[error("malformed input: elf {0} with no snacks (0 calories)")]
+    ElfWithNoSnacksNumbered(usize),
 }
