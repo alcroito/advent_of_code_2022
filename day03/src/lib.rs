@@ -37,19 +37,15 @@ pub fn part1(input: &Path) -> Result<(), Error> {
 pub fn part2(input: &Path) -> Result<(), Error> {
     let res: u32 = std::fs::read_to_string(input)?
         .lines()
-        .chunks(3)
-        .into_iter()
+        .tuples()
         .enumerate()
-        .map(|(i, group)| {
-            group
-                .map(|rucksack| rucksack.chars().collect::<HashSet<char>>())
-                .reduce(|acc, rucksack| {
-                    acc.intersection(&rucksack)
-                        .map(|e| e.to_owned())
-                        .collect::<HashSet<char>>()
-                })
-                .ok_or(Error::NoGroup(i))?
-                .iter()
+        .map(|(i, (e1, e2, e3))| {
+            let collector = |rucksack: &str| rucksack.chars().collect::<HashSet<char>>();
+            let (e1, e2, e3) = (collector(e1), collector(e2), collector(e3));
+            e1.intersection(&e2)
+                .copied()
+                .collect::<HashSet<char>>()
+                .intersection(&e3)
                 .next()
                 .ok_or(Error::NoBadgeFound(i))
                 .map(|item| priority(*item))
@@ -69,6 +65,4 @@ pub enum Error {
     NoMisplacedItem(usize),
     #[error("no badge found in group {0}")]
     NoBadgeFound(usize),
-    #[error("Invalid group with no elves {0}")]
-    NoGroup(usize),
 }
