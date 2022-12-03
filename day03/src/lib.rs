@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -44,16 +43,16 @@ pub fn part2(input: &Path) -> Result<(), Error> {
         .map(|(i, group)| {
             group
                 .map(|rucksack| rucksack.chars().collect::<HashSet<char>>())
-                .fold(HashMap::<char, u8>::new(), |counts, items| {
-                    items.into_iter().fold(counts, |mut counts, item| {
-                        counts.entry(item).and_modify(|e| *e += 1).or_insert(1);
-                        counts
-                    })
+                .reduce(|acc, rucksack| {
+                    acc.intersection(&rucksack)
+                        .map(|e| e.to_owned())
+                        .collect::<HashSet<char>>()
                 })
+                .ok_or(Error::NoGroup(i))?
                 .iter()
-                .find(|(_, count)| **count == 3)
+                .next()
                 .ok_or(Error::NoBadgeFound(i))
-                .map(|(item, _)| priority(*item))
+                .map(|item| priority(*item))
         })
         .collect::<Result<Vec<u32>, Error>>()?
         .iter()
@@ -70,4 +69,6 @@ pub enum Error {
     NoMisplacedItem(usize),
     #[error("no badge found in group {0}")]
     NoBadgeFound(usize),
+    #[error("Invalid group with no elves {0}")]
+    NoGroup(usize),
 }
