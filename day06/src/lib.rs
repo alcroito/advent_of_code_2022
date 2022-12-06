@@ -5,15 +5,9 @@ fn find_marker(s: &str, window_size: usize) -> Result<usize, Error> {
     s.trim()
         .as_bytes()
         .windows(window_size)
-        .enumerate()
-        .find_map(|(i, w)| {
-            if w.iter().all_unique() {
-                Some(i + window_size)
-            } else {
-                None
-            }
-        })
+        .position(|w| w.iter().all_unique())
         .ok_or(Error::NoSolution)
+        .map(|e| e + window_size)
 }
 
 pub fn part1(input: &Path) -> Result<(), Error> {
