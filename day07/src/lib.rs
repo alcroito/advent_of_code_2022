@@ -1,5 +1,6 @@
 extern crate derive_more;
 use derive_more::Display;
+use itertools::Itertools;
 use std::path::Path;
 use tailsome::IntoResult;
 
@@ -53,22 +54,7 @@ impl Directory {
     fn find_child_by_name(&self, name: &str, fs: &FSArena) -> Option<FSEntryIdx> {
         self.children
             .iter()
-            .find(|idx| {
-                let entry = &fs[**idx];
-                match entry {
-                    FSEntry::File(file) => {
-                        if file.name == name {
-                            return true;
-                        }
-                    }
-                    FSEntry::Directory(dir) => {
-                        if dir.name == name {
-                            return true;
-                        }
-                    }
-                }
-                false
-            })
+            .find(|idx| fs[**idx].name() == name)
             .cloned()
     }
 
@@ -106,6 +92,13 @@ impl FSEntry {
         }
         None
     }
+
+    fn name(&self) -> &str {
+        match self {
+            FSEntry::File(e) => &e.name,
+            FSEntry::Directory(e) => &e.name,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -117,6 +110,7 @@ impl FSArena {
     fn new() -> Self {
         Self { entries: vec![] }
     }
+
     fn next_index(&self) -> FSEntryIdx {
         FSEntryIdx::new(self.entries.len())
     }
@@ -124,23 +118,38 @@ impl FSArena {
     fn root_index(&self) -> FSEntryIdx {
         FSEntryIdx::new(0)
     }
+
+    fn root_directory(&self) -> Result<&Directory, Error> {
+        self.entries
+            .get(self.root_index().0)
+            .ok_or(Error::NoRootDirectoryInFS)
+            .and_then(|fs_entry| match fs_entry {
+                FSEntry::Directory(dir) => dir.into_ok(),
+                _ => Error::NoRootDirectoryInFS.into_err(),
+            })
+    }
+
+    fn iter(&self) -> FSIter {
+        FSIter {
+            to_visit: vec![(self.root_index(), 0)],
+            fs: self,
+        }
+    }
+
+    fn dir_iter(&self) -> DirectoryIter {
+        DirectoryIter {
+            to_visit: vec![self.root_index()],
+            fs: self,
+        }
+    }
 }
 
 impl std::fmt::Display for FSArena {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let indent_lvl = 0;
-        let mut to_visit = vec![(indent_lvl, self.root_index())];
-        while !to_visit.is_empty() {
-            let (indent_lvl, idx) = to_visit.pop().expect("Expected element in stack");
-            let indent = str::repeat(" ", indent_lvl * 2);
-            let fs_entry = &self[idx];
-            writeln!(f, "{}- {}", indent, fs_entry)?;
-
-            if let FSEntry::Directory(directory) = fs_entry {
-                to_visit.extend(directory.children.iter().map(|e| (indent_lvl + 1, *e)))
-            }
-        }
-        Ok(())
+        self.iter().try_for_each(|(fs_entry, rank)| {
+            let indent = str::repeat(" ", rank * 2);
+            writeln!(f, "{}- {}", indent, fs_entry)
+        })
     }
 }
 
@@ -154,6 +163,45 @@ impl std::ops::Index<FSEntryIdx> for FSArena {
 impl std::ops::IndexMut<FSEntryIdx> for FSArena {
     fn index_mut(&mut self, index: FSEntryIdx) -> &mut Self::Output {
         &mut self.entries[index.0]
+    }
+}
+
+struct DirectoryIter<'a> {
+    to_visit: ChildrenIdx,
+    fs: &'a FSArena,
+}
+
+impl<'a> Iterator for DirectoryIter<'a> {
+    type Item = &'a Directory;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let idx = self.to_visit.pop()?;
+            let fs_entry = &self.fs[idx];
+            if let FSEntry::Directory(directory) = fs_entry {
+                self.to_visit.extend(directory.children.iter().copied());
+                return Some(directory);
+            }
+        }
+    }
+}
+
+struct FSIter<'a> {
+    to_visit: Vec<(FSEntryIdx, usize)>,
+    fs: &'a FSArena,
+}
+
+impl<'a> Iterator for FSIter<'a> {
+    type Item = (&'a FSEntry, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (idx, rank) = self.to_visit.pop()?;
+        let fs_entry = &self.fs[idx];
+        if let FSEntry::Directory(directory) = fs_entry {
+            self.to_visit
+                .extend(directory.children.iter().map(|e| (*e, rank + 1)));
+        }
+        Some((fs_entry, rank))
     }
 }
 
@@ -307,53 +355,29 @@ fn assemble_fs(entries: ParsedEntries) -> FSArena {
 }
 
 fn sum_dirs_with_size_lt_100k(fs: &FSArena) -> usize {
-    let mut to_visit = vec![fs.root_index()];
-    let mut filtered = vec![];
-    while !to_visit.is_empty() {
-        let idx = to_visit.pop().expect("Expected element in stack");
-        let fs_entry = &fs[idx];
-        if let FSEntry::Directory(directory) = fs_entry {
-            let dir_size = directory.get_size(fs);
-            if dir_size < 100_000 {
-                filtered.push(dir_size);
-            }
-            to_visit.extend(directory.children.iter().copied())
-        }
-    }
-    filtered.into_iter().sum()
+    fs.dir_iter()
+        .map(|dir| dir.get_size(fs))
+        .filter(|size| *size < 100_000)
+        .sum()
 }
 
-const TOTAL_SPACE: usize = 70_000_000;
-const NEEDED_SPACE: usize = 30_000_000;
-
-fn find_smallest_dir_to_del(fs: &FSArena) -> usize {
-    let mut to_visit = vec![fs.root_index()];
-    let mut sizes = vec![];
-    while !to_visit.is_empty() {
-        let idx = to_visit.pop().expect("Expected element in stack");
-        let fs_entry = &fs[idx];
-        if let FSEntry::Directory(directory) = fs_entry {
-            let dir_size = directory.get_size(fs);
-            sizes.push(dir_size);
-            to_visit.extend(directory.children.iter().copied())
-        }
-    }
-    sizes.sort();
-    let used_space = if let FSEntry::Directory(dir) = &fs[fs.root_index()] {
-        dir.get_size(fs)
-    } else {
-        unreachable!("Root directory should exist");
-    };
-    sizes
-        .into_iter()
-        .find(|size| (TOTAL_SPACE - used_space + size) > NEEDED_SPACE)
+fn find_smallest_dir_to_del(fs: &FSArena) -> Result<usize, Error> {
+    let total_space: usize = 70_000_000;
+    let needed_space: usize = 30_000_000;
+    let used_space = fs.root_directory()?.get_size(fs);
+    fs.dir_iter()
+        .map(|dir| dir.get_size(fs))
+        .sorted()
+        .find(|size| (total_space - used_space + size) > needed_space)
         .expect("Expected to find result")
+        .into_ok()
 }
 
 pub fn part1(input: &Path) -> Result<(), Error> {
     let s = std::fs::read_to_string(input)?;
     let entries = parse_ops_and_fs_entries(&s)?;
     let fs = assemble_fs(entries);
+    println!("{}", &fs);
     let res = sum_dirs_with_size_lt_100k(&fs);
     println!("p1: {}", res);
     Ok(())
@@ -363,7 +387,7 @@ pub fn part2(input: &Path) -> Result<(), Error> {
     let s = std::fs::read_to_string(input)?;
     let entries = parse_ops_and_fs_entries(&s)?;
     let fs = assemble_fs(entries);
-    let res = find_smallest_dir_to_del(&fs);
+    let res = find_smallest_dir_to_del(&fs)?;
     println!("p2: {}", res);
     Ok(())
 }
@@ -382,4 +406,6 @@ pub enum Error {
     InvalidLine(String),
     #[error(transparent)]
     InvalidFileSize(#[from] std::num::ParseIntError),
+    #[error("No root directory found")]
+    NoRootDirectoryInFS,
 }
