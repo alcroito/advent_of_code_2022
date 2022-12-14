@@ -431,6 +431,7 @@ dependencies = [
  "derive_more",
  "itertools",
  "structopt",
+ "tailsome",
  "thiserror",
 ]
 
@@ -1544,6 +1545,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "tailsome"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8e274bbec6aa464f50e4b2268f12108ad97ca4900bb11b095e785bf38b7ab45"
 
 [[package]]
 name = "tap"

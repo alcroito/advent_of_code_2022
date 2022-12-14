@@ -1,7 +1,7 @@
 extern crate derive_more;
 use derive_more::Display;
-use itertools::Itertools;
 use std::path::Path;
+use tailsome::IntoResult;
 
 #[derive(Debug, Display)]
 #[display(fmt = "{} (file, size={})", name, size)]
@@ -191,50 +191,38 @@ enum ParsedEntry {
 
 type ParsedEntries = Vec<ParsedEntry>;
 
-const CD_TOKEN: &str = "$ cd ";
-const LS_TOKEN: &str = "$ ls";
-
 fn parse_op(l: &str) -> Result<Op, Error> {
-    if l.starts_with(CD_TOKEN) {
-        let directory = l.chars().skip(CD_TOKEN.len()).collect::<String>();
-        if directory == "/" {
-            Ok(Op::ChangeDirectoryRoot)
-        } else if directory == ".." {
-            Ok(Op::ChangeDirectoryUp)
-        } else {
-            Ok(Op::ChangeDirectory(ChangeDirectoryArg::new(&directory)))
-        }
-    } else if l == LS_TOKEN {
-        Ok(Op::List)
-    } else {
-        Err(Error::InvalidOperation(l.to_owned()))
+    match l.split(' ').collect::<Vec<_>>().as_slice() {
+        ["$", "cd", "/"] => Op::ChangeDirectoryRoot,
+        ["$", "cd", ".."] => Op::ChangeDirectoryUp,
+        ["$", "cd", dir] => Op::ChangeDirectory(ChangeDirectoryArg::new(dir)),
+        ["$", "ls"] => Op::List,
+        _ => Error::InvalidOperation(l.to_owned()).into_err()?,
     }
+    .into_ok()
 }
 
-const DIR_TOKEN: &str = "dir ";
-
 fn parse_fs_entry(l: &str) -> Result<FSEntry, Error> {
-    if l.starts_with(DIR_TOKEN) {
-        let name = l.chars().skip(DIR_TOKEN.len()).collect::<String>();
-        return Ok(FSEntry::Directory(Directory::new(&name)));
+    match l.split(' ').collect::<Vec<_>>().as_slice() {
+        ["dir", name] => FSEntry::Directory(Directory::new(name)),
+        [size, name] => {
+            let size = size.parse::<usize>()?;
+            FSEntry::File(File::new(name, size))
+        }
+        _ => Error::InvalidFSEntry(l.to_owned()).into_err()?,
     }
-
-    let (size_str, name) = l
-        .split(' ')
-        .collect_tuple()
-        .ok_or_else(|| Error::InvalidFSEntry(l.to_owned()))?;
-    let size = size_str.parse::<usize>()?;
-    Ok(FSEntry::File(File::new(name, size)))
+    .into_ok()
 }
 
 fn parse_ops_and_fs_entries(s: &str) -> Result<ParsedEntries, Error> {
     s.split('\n')
         .map(|l| {
-            if l.starts_with('$') {
-                Ok(ParsedEntry::DoOp(parse_op(l)?))
-            } else {
-                Ok(ParsedEntry::ListFSEntry(parse_fs_entry(l)?))
+            match &l.get(0..1) {
+                Some("$") => ParsedEntry::DoOp(parse_op(l)?),
+                Some(_) => ParsedEntry::ListFSEntry(parse_fs_entry(l)?),
+                None => Error::InvalidLine(l.to_owned()).into_err()?,
             }
+            .into_ok()
         })
         .collect::<Result<Vec<ParsedEntry>, Error>>()
 }
@@ -390,6 +378,8 @@ pub enum Error {
     InvalidOperation(String),
     #[error("Invalid file system entry {0}")]
     InvalidFSEntry(String),
+    #[error("Failed to parse line {0}")]
+    InvalidLine(String),
     #[error(transparent)]
     InvalidFileSize(#[from] std::num::ParseIntError),
 }
