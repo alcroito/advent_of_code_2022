@@ -287,86 +287,92 @@ fn parse_ops_and_fs_entries(s: &str) -> Result<ParsedEntries, Error> {
         .collect::<Result<Vec<ParsedEntry>, Error>>()
 }
 
-fn assemble_fs(entries: ParsedEntries) -> FSArena {
-    let mut fs = FSArena::new();
-    let mut curr_dir_idx = FSEntryIdx::new(0);
-    for entry in entries {
-        match entry {
-            ParsedEntry::DoOp(op) => {
-                match op {
-                    Op::ChangeDirectory(directory) => {
-                        let curr_dir = &fs[curr_dir_idx];
-                        let maybe_child_dir_idx =
-                            curr_dir.find_child_idx_by_name(&directory.name, &fs);
-                        // FIXME use Result
-                        let child_dir_idx =
-                            maybe_child_dir_idx.expect("Directory should have been created");
-                        curr_dir_idx = child_dir_idx;
-                    }
-                    Op::ChangeDirectoryUp => {
-                        let curr_dir = &fs[curr_dir_idx];
-                        if let FSEntry::Directory(curr_dir) = curr_dir {
-                            // FIXME use Result
-                            curr_dir_idx = curr_dir
-                                .parent
-                                .expect("Expecting directory to have a parent")
-                        } else {
-                            // FIXME use Result
-                            unreachable!("Expected to find a directory")
-                        }
-                    }
-                    Op::ChangeDirectoryRoot => {
-                        curr_dir_idx = fs.next_index();
-                        let mut directory = Directory::new("/");
-                        directory.index = Some(fs.root_index());
-                        let new_dir = FSEntry::Directory(directory);
-                        fs.entries.push(new_dir);
-                    }
-                    Op::List => {
-                        // TODO: Validate that next ParsedEntry is an FSEntry
-                    }
+struct AssembleFSState {
+    curr_dir_idx: FSEntryIdx,
+    fs: FSArena,
+}
+
+fn handle_parsed_entry(
+    entry: ParsedEntry,
+    mut state: AssembleFSState,
+) -> Result<AssembleFSState, Error> {
+    let curr_dir_idx = &mut state.curr_dir_idx;
+    let fs = &mut state.fs;
+    match entry {
+        ParsedEntry::DoOp(Op::ChangeDirectory(directory)) => {
+            let curr_dir = &fs[*curr_dir_idx];
+            let maybe_child_dir_idx = curr_dir.find_child_idx_by_name(&directory.name, fs);
+            let child_dir_idx = maybe_child_dir_idx
+                .ok_or_else(|| Error::FSEntryNotFound(directory.name.to_owned()))?;
+            *curr_dir_idx = child_dir_idx;
+        }
+        ParsedEntry::DoOp(Op::ChangeDirectoryUp) => {
+            let curr_dir = &fs[*curr_dir_idx];
+            match curr_dir {
+                FSEntry::Directory(curr_dir) => {
+                    *curr_dir_idx = curr_dir
+                        .parent
+                        .ok_or_else(|| Error::DirHasNoParent(curr_dir.name.to_owned()))?
                 }
-            }
-            ParsedEntry::ListFSEntry(fs_entry) => {
-                match fs_entry {
-                    FSEntry::File(file) => {
-                        let curr_dir = &fs[curr_dir_idx];
-                        assert!(curr_dir.find_child_idx_by_name(&file.name, &fs).is_none());
-                        let new_file = FSEntry::File(file);
-                        let new_file_idx = fs.next_index();
-                        fs.entries.push(new_file);
-                        let curr_dir = &mut fs[curr_dir_idx];
-                        if let FSEntry::Directory(curr_dir) = curr_dir {
-                            curr_dir.children.push(new_file_idx)
-                        } else {
-                            // FIXME use Result
-                            unreachable!("Expected to find a file")
-                        }
-                    }
-                    FSEntry::Directory(directory) => {
-                        let curr_dir = &fs[curr_dir_idx];
-                        assert!(curr_dir
-                            .find_child_idx_by_name(&directory.name, &fs)
-                            .is_none());
-                        let mut directory = directory;
-                        let new_dir_idx = fs.next_index();
-                        directory.parent = Some(curr_dir_idx);
-                        directory.index = Some(new_dir_idx);
-                        let new_dir = FSEntry::Directory(directory);
-                        fs.entries.push(new_dir);
-                        let curr_dir = &mut fs[curr_dir_idx];
-                        if let FSEntry::Directory(curr_dir) = curr_dir {
-                            curr_dir.children.push(new_dir_idx)
-                        } else {
-                            // FIXME use Result
-                            unreachable!("Expected to find a directory")
-                        }
-                    }
-                }
+                _ => Error::CurrentDirIsNotDir(curr_dir_idx.0).into_err()?,
             }
         }
-    }
-    fs
+        ParsedEntry::DoOp(Op::ChangeDirectoryRoot) => {
+            *curr_dir_idx = fs.next_index();
+            let mut directory = Directory::new("/");
+            directory.index = Some(fs.root_index());
+            let new_dir = FSEntry::Directory(directory);
+            fs.entries.push(new_dir);
+        }
+        ParsedEntry::DoOp(Op::List) => {
+            // TODO: Validate that next ParsedEntry is an FSEntry
+        }
+        ParsedEntry::ListFSEntry(FSEntry::File(file)) => {
+            let curr_dir = &fs[*curr_dir_idx];
+            assert!(curr_dir.find_child_idx_by_name(&file.name, fs).is_none());
+            let new_file = FSEntry::File(file);
+            let new_file_idx = fs.next_index();
+            fs.entries.push(new_file);
+
+            // Reborrow as mutable
+            let curr_dir = &mut fs[*curr_dir_idx];
+            match curr_dir {
+                FSEntry::Directory(curr_dir) => curr_dir.children.push(new_file_idx),
+                _ => Error::CurrentDirIsNotDir(curr_dir_idx.0).into_err()?,
+            }
+        }
+        ParsedEntry::ListFSEntry(FSEntry::Directory(directory)) => {
+            let curr_dir = &fs[*curr_dir_idx];
+            assert!(curr_dir
+                .find_child_idx_by_name(&directory.name, fs)
+                .is_none());
+            let mut directory = directory;
+            let new_dir_idx = fs.next_index();
+            directory.parent = Some(*curr_dir_idx);
+            directory.index = Some(new_dir_idx);
+            let new_dir = FSEntry::Directory(directory);
+            fs.entries.push(new_dir);
+
+            // Reborrow as mutable
+            let curr_dir = &mut fs[*curr_dir_idx];
+            match curr_dir {
+                FSEntry::Directory(curr_dir) => curr_dir.children.push(new_dir_idx),
+                _ => Error::CurrentDirIsNotDir(curr_dir_idx.0).into_err()?,
+            }
+        }
+    };
+    Ok(state)
+}
+
+fn assemble_fs(entries: ParsedEntries) -> Result<FSArena, Error> {
+    let state = AssembleFSState {
+        curr_dir_idx: FSEntryIdx::new(0),
+        fs: FSArena::new(),
+    };
+    entries
+        .into_iter()
+        .try_fold(state, |state, e| handle_parsed_entry(e, state))
+        .map(|state| state.fs)
 }
 
 fn sum_dirs_with_size_lt_100k(fs: &FSArena) -> usize {
@@ -384,15 +390,13 @@ fn find_smallest_dir_to_del(fs: &FSArena) -> Result<usize, Error> {
         .map(|dir| dir.get_size(fs))
         .sorted()
         .find(|size| (total_space - used_space + size) > needed_space)
-        .expect("Expected to find result")
-        .into_ok()
+        .ok_or(Error::NoSolution)
 }
 
 pub fn part1(input: &Path) -> Result<(), Error> {
     let s = std::fs::read_to_string(input)?;
     let entries = parse_ops_and_fs_entries(&s)?;
-    let fs = assemble_fs(entries);
-    println!("{}", &fs);
+    let fs = assemble_fs(entries)?;
     let res = sum_dirs_with_size_lt_100k(&fs);
     println!("p1: {}", res);
     Ok(())
@@ -401,7 +405,7 @@ pub fn part1(input: &Path) -> Result<(), Error> {
 pub fn part2(input: &Path) -> Result<(), Error> {
     let s = std::fs::read_to_string(input)?;
     let entries = parse_ops_and_fs_entries(&s)?;
-    let fs = assemble_fs(entries);
+    let fs = assemble_fs(entries)?;
     let res = find_smallest_dir_to_del(&fs)?;
     println!("p2: {}", res);
     Ok(())
@@ -423,4 +427,10 @@ pub enum Error {
     InvalidFileSize(#[from] std::num::ParseIntError),
     #[error("No root directory found")]
     NoRootDirectoryInFS,
+    #[error("File system entry not found {0}")]
+    FSEntryNotFound(String),
+    #[error("Directory has no parent {0}")]
+    DirHasNoParent(String),
+    #[error("PWD is not a directory {0}")]
+    CurrentDirIsNotDir(usize),
 }
