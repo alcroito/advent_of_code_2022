@@ -17,32 +17,30 @@ fn parse_input(input: &Path) -> Result<(Stacks, Ops), Error> {
 }
 
 fn parse_stacks(stacks_str: &str) -> Result<Stacks, Error> {
-    let mut lines = stacks_str.split('\n').rev().peekable();
+    let mut lines = stacks_str.split('\n').rev();
 
     let ids_char_count = lines
-        .peek()
+        .next()
         .map(|e| e.len())
         .ok_or(Error::CantDetermineStackCount)?;
-    let stack_count = (ids_char_count - 3) / 4 + 1;
+    let stack_count = ids_char_count / 4 + 1;
 
-    let mut stacks: Stacks = vec![vec![]; stack_count];
-
-    lines.skip(1).for_each(|l| {
+    let stacks: Stacks = vec![vec![]; stack_count];
+    let stacks = lines.fold(stacks, |stacks, l| {
         l.as_bytes()
             .chunks(4)
-            .map(|e| {
+            .enumerate()
+            .filter_map(|(col, e)| {
                 if e[0] == b'[' {
-                    Some(e[1] as char)
+                    Some((col, e[1] as char))
                 } else {
                     None
                 }
             })
-            .enumerate()
-            .for_each(|(i, e)| {
-                if let Some(item) = e {
-                    stacks[i].push(item)
-                }
-            });
+            .fold(stacks, |mut stacks, (col, item)| {
+                stacks[col].push(item);
+                stacks
+            })
     });
 
     Ok(stacks)
@@ -61,6 +59,7 @@ fn parse_ops(ops_str: &str) -> Result<Ops, Error> {
     Ok(ops)
 }
 
+#[allow(unused)]
 fn until_err<T, E>(err: &mut &mut Result<(), E>, item: Result<T, E>) -> Option<T> {
     match item {
         Ok(item) => Some(item),
@@ -86,9 +85,7 @@ fn get_two_mut<T>(slice: &mut [T], index1: usize, index2: usize) -> Option<(&mut
 }
 
 fn run_ops(ops: Ops, stacks: &mut Stacks, p2: bool) -> Result<(), Error> {
-    for (count, from, to) in ops {
-        let mut err: Result<_, Error> = Ok(());
-
+    ops.into_iter().try_for_each(|(count, from, to)| {
         let (stack_from, stack_to) =
             get_two_mut(stacks, from - 1, to - 1).ok_or(Error::InvalidOp)?;
 
@@ -98,15 +95,14 @@ fn run_ops(ops: Ops, stacks: &mut Stacks, p2: bool) -> Result<(), Error> {
                 let item = stack_from.pop().ok_or(Error::StackEmpty(from))?;
                 Ok(item)
             })
-            .scan(&mut err, until_err);
-        if p2 {
-            stack_to.extend(extender.collect::<Vec<char>>().into_iter().rev());
-        } else {
-            stack_to.extend(extender);
+            .collect::<Result<Vec<char>, Error>>()?
+            .into_iter();
+        match p2 {
+            true => stack_to.extend(extender.rev()),
+            false => stack_to.extend(extender),
         }
-        err?;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 fn get_stacks_top(stacks: &Stacks) -> Result<String, Error> {
@@ -117,9 +113,7 @@ fn get_stacks_top(stacks: &Stacks) -> Result<String, Error> {
             let item = stack.last().cloned().ok_or(Error::StackEmpty(i))?;
             Ok(item)
         })
-        .collect::<Result<Vec<char>, Error>>()?
-        .iter()
-        .collect::<String>();
+        .collect::<Result<String, Error>>()?;
     Ok(res)
 }
 
