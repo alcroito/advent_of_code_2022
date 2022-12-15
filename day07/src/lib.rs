@@ -37,6 +37,7 @@ type ChildrenIdx = Vec<FSEntryIdx>;
 struct Directory {
     name: String,
     children: ChildrenIdx,
+    index: Option<FSEntryIdx>,
     parent: Option<FSEntryIdx>,
     size: std::cell::Cell<Option<usize>>,
 }
@@ -46,6 +47,7 @@ impl Directory {
         Self {
             name: name.to_owned(),
             children: vec![],
+            index: None,
             parent: None,
             size: std::cell::Cell::new(None),
         }
@@ -63,15 +65,13 @@ impl Directory {
             return size;
         }
 
-        let mut size = 0;
-        for idx in &self.children {
-            let fs_entry = &fs[*idx];
-
-            match fs_entry {
-                FSEntry::File(file) => size += file.size,
-                FSEntry::Directory(directory) => size += directory.get_size(fs),
-            }
-        }
+        let size = fs
+            .iter_dir_contents(self)
+            .map(|(fs_entry, _)| match fs_entry {
+                FSEntry::File(file) => file.size,
+                FSEntry::Directory(directory) => directory.get_size(fs),
+            })
+            .sum();
         self.size.set(Some(size));
         size
     }
@@ -133,6 +133,15 @@ impl FSArena {
         FSIter {
             to_visit: vec![(self.root_index(), 0)],
             fs: self,
+            recursive: true,
+        }
+    }
+
+    fn iter_dir_contents(&self, dir: &Directory) -> FSIter {
+        FSIter {
+            to_visit: dir.children.iter().map(|e| (*e, 0)).collect(),
+            fs: self,
+            recursive: false,
         }
     }
 
@@ -189,6 +198,7 @@ impl<'a> Iterator for DirectoryIter<'a> {
 struct FSIter<'a> {
     to_visit: Vec<(FSEntryIdx, usize)>,
     fs: &'a FSArena,
+    recursive: bool,
 }
 
 impl<'a> Iterator for FSIter<'a> {
@@ -197,9 +207,11 @@ impl<'a> Iterator for FSIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let (idx, rank) = self.to_visit.pop()?;
         let fs_entry = &self.fs[idx];
-        if let FSEntry::Directory(directory) = fs_entry {
-            self.to_visit
-                .extend(directory.children.iter().map(|e| (*e, rank + 1)));
+        if self.recursive {
+            if let FSEntry::Directory(directory) = fs_entry {
+                self.to_visit
+                    .extend(directory.children.iter().map(|e| (*e, rank + 1)));
+            }
         }
         Some((fs_entry, rank))
     }
@@ -305,7 +317,9 @@ fn assemble_fs(entries: ParsedEntries) -> FSArena {
                     }
                     Op::ChangeDirectoryRoot => {
                         curr_dir_idx = fs.next_index();
-                        let new_dir = FSEntry::Directory(Directory::new("/"));
+                        let mut directory = Directory::new("/");
+                        directory.index = Some(fs.root_index());
+                        let new_dir = FSEntry::Directory(directory);
                         fs.entries.push(new_dir);
                     }
                     Op::List => {
@@ -335,9 +349,10 @@ fn assemble_fs(entries: ParsedEntries) -> FSArena {
                             .find_child_idx_by_name(&directory.name, &fs)
                             .is_none());
                         let mut directory = directory;
-                        directory.parent = Some(curr_dir_idx);
-                        let new_dir = FSEntry::Directory(directory);
                         let new_dir_idx = fs.next_index();
+                        directory.parent = Some(curr_dir_idx);
+                        directory.index = Some(new_dir_idx);
+                        let new_dir = FSEntry::Directory(directory);
                         fs.entries.push(new_dir);
                         let curr_dir = &mut fs[curr_dir_idx];
                         if let FSEntry::Directory(curr_dir) = curr_dir {
