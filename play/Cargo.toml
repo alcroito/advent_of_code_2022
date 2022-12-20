@@ -1,0 +1,13 @@
+[package]
+name = "play"
+version = "0.1.0"
+authors = ["placinta@gmail.com"]
+edition = "2021"
+
+[dependencies]
+color-eyre = "0.5.10"
+thiserror = "1.0.22"
+itertools = "0"
+derive_more = "0.99.17"
+tailsome = "0.1.0"
+error-stack = "0.2"

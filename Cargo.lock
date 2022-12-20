@@ -45,6 +45,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.68"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cb2f989d18dd141ab8ae82f64d1a8cdd37e0840f73a406896cf5e99502fab61"
+
+[[package]]
 name = "aoclib"
 version = "0.1.0"
 source = "git+https://github.com/coriolinus/aoclib.git#dae26274f6519d0ccc2c5ef80ecf691d5d4eb95a"
@@ -206,7 +212,7 @@ dependencies = [
  "eyre",
  "indenter",
  "once_cell",
- "owo-colors",
+ "owo-colors 1.3.0",
  "tracing-error",
 ]
 
@@ -217,7 +223,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6eee477a4a8a72f4addd4de416eb56d54bc307b284d6601bafdee1f4ea462d1"
 dependencies = [
  "once_cell",
- "owo-colors",
+ "owo-colors 1.3.0",
  "tracing-core",
  "tracing-error",
 ]
@@ -494,6 +500,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9852635589dc9f9ea1b6fe9f05b50ef208c85c834a562f0c6abb1c475736ec2b"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "error-stack"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "859d224e04b2d93d974c08e375dac9b8d1a513846e44c6666450a57b1ed963f9"
+dependencies = [
+ "anyhow",
+ "owo-colors 3.5.0",
+ "rustc_version",
 ]
 
 [[package]]
@@ -830,6 +847,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f88c5561171189e69df9d98bcf18fd5f9558300f7ea7b801eb8a0fd748bd8745"
 
 [[package]]
+name = "is_ci"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "616cde7c720bb2bb5824a224687d8f77bfd38922027f01d825cd7453be5099fb"
+
+[[package]]
 name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1102,6 +1125,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2386b4ebe91c2f7f51082d4cefa145d030e33a1842a96b12e4885cc3c01f7a55"
 
 [[package]]
+name = "owo-colors"
+version = "3.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1b04fb49957986fdce4d6ee7a65027d55d4b6d2265e5848bbb507b58ccfdb6f"
+dependencies = [
+ "supports-color",
+]
+
+[[package]]
 name = "parse-display"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1150,6 +1182,18 @@ name = "pkg-config"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ac9a59f73473f1b8d852421e59e64809f025994837ef743615c6d0c5b305160"
+
+[[package]]
+name = "play"
+version = "0.1.0"
+dependencies = [
+ "color-eyre",
+ "derive_more",
+ "error-stack",
+ "itertools",
+ "tailsome",
+ "thiserror",
+]
 
 [[package]]
 name = "proc-macro-error"
@@ -1546,6 +1590,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "supports-color"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ba6faf2ca7ee42fdd458f4347ae0a9bd6bcc445ad7cb57ad82b383f18870d6f"
+dependencies = [
+ "atty",
+ "is_ci",
 ]
 
 [[package]]
