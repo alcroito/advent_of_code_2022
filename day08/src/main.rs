@@ -46,8 +46,8 @@ fn main() -> Result<()> {
     if !args.no_part1 {
         part1(&input_path)?;
     }
-    if args.part2 {
+    // if args.part2 {
         part2(&input_path)?;
-    }
+    // }
     Ok(())
 }
