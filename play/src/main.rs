@@ -1,4 +1,8 @@
-use play::{play, Error, ErrorV2};
+use play::{
+    play,
+    //Error,
+    ErrorV2,
+};
 
 // use color_eyre::eyre::Result;
 // use color_eyre::eyre::eyre;

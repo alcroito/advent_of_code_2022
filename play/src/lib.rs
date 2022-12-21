@@ -24,8 +24,7 @@ fn parse_numbers(s: &str) -> Result<Vec<i32>, ErrorV2> {
 }
 
 fn do_arr_stuff() -> Result<(), ErrorV2> {
-    let m = ndarray::array![[1, 2],
-                    [3, 4]];
+    let m = ndarray::array![[1, 2], [3, 4]];
     m.axis_iter(ndarray::Axis(1)).for_each(|e| {
         println!("{}", e);
     });
@@ -33,11 +32,11 @@ fn do_arr_stuff() -> Result<(), ErrorV2> {
     Ok(())
 }
 
-
 struct IterWrapper<T>(T);
 
 impl<T> Iterator for IterWrapper<T>
-where T: Iterator
+where
+    T: Iterator,
 {
     type Item = <T as ::core::iter::Iterator>::Item;
 
@@ -54,19 +53,6 @@ fn do_iter_stuff() -> Result<(), ErrorV2> {
         println!("{el}");
     }
     Ok(())
-}
-
-pub fn play() -> Result<(), ErrorV2> {
-    let s = "1 2 3 4
-5 6 7
-8 9";
-    parse_numbers(s)?;
-
-    do_arr_stuff()?;
-    do_iter_stuff()?;
-    // dbg!(res);
-    Ok(())
-    // Err(eyre!("help").warning("Failed to parse").note("some note").wrap_err("another err").into())
 }
 
 #[allow(unused)]
@@ -111,3 +97,21 @@ pub enum ErrorV2 {
 //         Error::ParseInt{input: input.to_owned(), source: self}
 //     }
 // }
+
+mod grid;
+
+pub fn play() -> Result<(), ErrorV2> {
+    let s = "1 2 3 4
+5 6 7
+8 9";
+    parse_numbers(s)?;
+
+    do_arr_stuff()?;
+    do_iter_stuff()?;
+
+    grid::iterate_grid();
+
+    // dbg!(res);
+    Ok(())
+    // Err(eyre!("help").warning("Failed to parse").note("some note").wrap_err("another err").into())
+}
