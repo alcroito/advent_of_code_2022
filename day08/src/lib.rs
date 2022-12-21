@@ -10,19 +10,19 @@ type Idx = (usize, usize);
 
 #[derive(Clone, Copy)]
 enum GridIterDirection {
-    RowsLeftToRight,
-    RowsRightToLeft,
-    ColsTopToBottom,
-    ColsBottomToTop,
+    LeftToRight,
+    RightToLeft,
+    TopToBottom,
+    BottomToTop,
 }
 
 impl GridIterDirection {
     fn side_index(&self) -> usize {
         match self {
-            GridIterDirection::RowsLeftToRight => 0,
-            GridIterDirection::RowsRightToLeft => 1,
-            GridIterDirection::ColsTopToBottom => 2,
-            GridIterDirection::ColsBottomToTop => 3,
+            GridIterDirection::LeftToRight => 0,
+            GridIterDirection::RightToLeft => 1,
+            GridIterDirection::TopToBottom => 2,
+            GridIterDirection::BottomToTop => 3,
         }
     }
 }
@@ -37,7 +37,6 @@ type BoxedGridIndexIter<'a> = Box<dyn Iterator<Item = BoxedAxisIndexIter<'a>> + 
 #[derive(Debug, Clone)]
 struct Grid {
     g: Vec<Value>,
-    #[allow(unused)]
     rows: usize,
     cols: usize,
 }
@@ -55,40 +54,76 @@ impl Grid {
         row * self.cols + col
     }
 
+    // Row major
+    fn row_index_iter_with_bounds(
+        &self,
+        row: usize,
+        start_col: usize,
+        end_col: usize,
+    ) -> impl DoubleEndedIterator<Item = Idx> {
+        (start_col..end_col).map(move |col| (row, col))
+    }
+
+    fn row_index_iter_rev_with_bounds(
+        &self,
+        row: usize,
+        start_col: usize,
+        end_col: usize,
+    ) -> impl DoubleEndedIterator<Item = Idx> {
+        self.row_index_iter_with_bounds(row, start_col, end_col)
+            .rev()
+    }
+
     fn row_index_iter(&self, row: usize) -> impl DoubleEndedIterator<Item = Idx> {
-        let start = 0;
-        let end = self.cols;
-        (start..end).map(move |col| (row, col))
+        self.row_index_iter_with_bounds(row, 0, self.cols)
     }
 
     fn row_index_iter_rev(&self, row: usize) -> impl DoubleEndedIterator<Item = Idx> {
-        self.row_index_iter(row).rev()
+        self.row_index_iter_rev_with_bounds(row, 0, self.cols)
+    }
+
+    // Column major
+    fn col_index_iter_with_bounds(
+        &self,
+        col: usize,
+        start_row: usize,
+        end_row: usize,
+    ) -> impl DoubleEndedIterator<Item = Idx> {
+        (start_row..end_row).map(move |row| (row, col))
+    }
+
+    fn col_index_iter_rev_with_bounds(
+        &self,
+        col: usize,
+        start_row: usize,
+        end_row: usize,
+    ) -> impl DoubleEndedIterator<Item = Idx> {
+        self.col_index_iter_with_bounds(col, start_row, end_row)
+            .rev()
     }
 
     fn col_index_iter(&self, col: usize) -> impl DoubleEndedIterator<Item = Idx> {
-        let start = 0;
-        let end = self.rows;
-        (start..end).map(move |row| (row, col))
+        self.col_index_iter_with_bounds(col, 0, self.rows)
     }
 
     fn col_index_iter_rev(&self, col: usize) -> impl DoubleEndedIterator<Item = Idx> {
-        self.col_index_iter(col).rev()
+        self.col_index_iter_rev_with_bounds(col, 0, self.cols)
     }
 
     #[allow(unused)]
     fn index_iter_dynamic_dispatch(&self, dir: &GridIterDirection) -> BoxedGridIndexIter {
         match dir {
-            GridIterDirection::RowsLeftToRight => Box::new(
+            GridIterDirection::LeftToRight => Box::new(
                 (0..self.rows).map(|row| Box::new(self.row_index_iter(row)) as BoxedAxisIndexIter),
             ) as BoxedGridIndexIter,
-            GridIterDirection::RowsRightToLeft => Box::new(
+            GridIterDirection::RightToLeft => Box::new(
                 (0..self.rows)
                     .map(|row| Box::new(self.row_index_iter_rev(row)) as BoxedAxisIndexIter),
             ) as BoxedGridIndexIter,
-            GridIterDirection::ColsTopToBottom => Box::new(
+            GridIterDirection::TopToBottom => Box::new(
                 (0..self.cols).map(|col| Box::new(self.col_index_iter(col)) as BoxedAxisIndexIter),
             ) as BoxedGridIndexIter,
-            GridIterDirection::ColsBottomToTop => Box::new(
+            GridIterDirection::BottomToTop => Box::new(
                 (0..self.cols)
                     .map(|col| Box::new(self.col_index_iter_rev(col)) as BoxedAxisIndexIter),
             ) as BoxedGridIndexIter,
@@ -106,18 +141,46 @@ impl Grid {
         impl Iterator<Item = Idx>,
     > {
         match dir {
-            GridIterDirection::RowsLeftToRight => {
+            GridIterDirection::LeftToRight => {
                 GridAxisIterator::RowLeftToRight(self.row_index_iter(axis_index))
             }
-            GridIterDirection::RowsRightToLeft => {
+            GridIterDirection::RightToLeft => {
                 GridAxisIterator::RowRightToLeft(self.row_index_iter_rev(axis_index))
             }
-            GridIterDirection::ColsTopToBottom => {
+            GridIterDirection::TopToBottom => {
                 GridAxisIterator::ColTopToBottom(self.col_index_iter(axis_index))
             }
-            GridIterDirection::ColsBottomToTop => {
+            GridIterDirection::BottomToTop => {
                 GridAxisIterator::ColBottomToTop(self.col_index_iter_rev(axis_index))
             }
+        }
+    }
+
+    fn axis_index_iter_with_bounds(
+        &self,
+        axis_index: usize,
+        start_bound: usize,
+        end_bound: usize,
+        dir: &GridIterDirection,
+    ) -> GridAxisIterator<
+        impl Iterator<Item = Idx>,
+        impl Iterator<Item = Idx>,
+        impl Iterator<Item = Idx>,
+        impl Iterator<Item = Idx>,
+    > {
+        match dir {
+            GridIterDirection::LeftToRight => GridAxisIterator::RowLeftToRight(
+                self.row_index_iter_with_bounds(axis_index, start_bound, end_bound),
+            ),
+            GridIterDirection::RightToLeft => GridAxisIterator::RowRightToLeft(
+                self.row_index_iter_rev_with_bounds(axis_index, start_bound, end_bound),
+            ),
+            GridIterDirection::TopToBottom => GridAxisIterator::ColTopToBottom(
+                self.col_index_iter_with_bounds(axis_index, start_bound, end_bound),
+            ),
+            GridIterDirection::BottomToTop => GridAxisIterator::ColBottomToTop(
+                self.col_index_iter_rev_with_bounds(axis_index, start_bound, end_bound),
+            ),
         }
     }
 
@@ -127,16 +190,16 @@ impl Grid {
     ) -> impl Iterator<Item = impl Iterator<Item = Idx>> + '_ {
         let dir = *dir;
         match dir {
-            GridIterDirection::RowsLeftToRight => GridIterator::RowsLeftToRight(
+            GridIterDirection::LeftToRight => GridIterator::RowsLeftToRight(
                 (0..self.rows).map(move |row| self.axis_index_iter_static(row, &dir)),
             ),
-            GridIterDirection::RowsRightToLeft => GridIterator::RowsRightToLeft(
+            GridIterDirection::RightToLeft => GridIterator::RowsRightToLeft(
                 (0..self.rows).map(move |row| self.axis_index_iter_static(row, &dir)),
             ),
-            GridIterDirection::ColsTopToBottom => GridIterator::ColsTopToBottom(
+            GridIterDirection::TopToBottom => GridIterator::ColsTopToBottom(
                 (0..self.cols).map(move |col| self.axis_index_iter_static(col, &dir)),
             ),
-            GridIterDirection::ColsBottomToTop => GridIterator::ColsBottomToTop(
+            GridIterDirection::BottomToTop => GridIterator::ColsBottomToTop(
                 (0..self.cols).map(move |col| self.axis_index_iter_static(col, &dir)),
             ),
         }
@@ -243,12 +306,14 @@ impl Forest {
     }
 
     fn compute_visibility_grid_from_each_direction(&mut self) {
-        for direction in [
-            GridIterDirection::RowsLeftToRight,
-            GridIterDirection::RowsRightToLeft,
-            GridIterDirection::ColsTopToBottom,
-            GridIterDirection::ColsBottomToTop,
-        ] {
+        [
+            GridIterDirection::LeftToRight,
+            GridIterDirection::RightToLeft,
+            GridIterDirection::TopToBottom,
+            GridIterDirection::BottomToTop,
+        ]
+        .into_iter()
+        .for_each(|direction| {
             let grid_iter = self.heightmap.index_iter_static_dispatch(&direction);
             let direction_index = direction.side_index();
             grid_iter.for_each(|axis_iter| {
@@ -258,7 +323,7 @@ impl Forest {
                     max_hight
                 });
             });
-        }
+        })
     }
 
     fn is_tree_visible(&self, index: Idx) -> bool {
@@ -270,62 +335,62 @@ impl Forest {
 
     fn count_visible_trees(&self) -> usize {
         self.heightmap
-            .index_iter_static_dispatch(&GridIterDirection::RowsLeftToRight)
+            .index_iter_static_dispatch(&GridIterDirection::LeftToRight)
             .flat_map(|axis_iter| axis_iter.map(|index| self.is_tree_visible(index)))
             .filter(|is_visible| *is_visible)
             .count()
     }
 
-    fn get_tree_scenic_score(&self, row: usize, col: usize) -> usize {
-        let mut scenic_score = 1;
+    fn get_tree_scenic_score(&self, index: Idx) -> usize {
+        let row = index.0;
+        let col = index.1;
         let tree_height = self.heightmap[(row, col)];
 
-        // LeftToRight
-        let mut visible = 0;
-        for c in col + 1..self.heightmap.cols {
-            visible += 1;
-            if self.heightmap[(row, c)] >= tree_height {
-                break;
-            }
-        }
-        scenic_score *= visible;
+        let directions = [
+            (
+                GridIterDirection::LeftToRight,
+                row,
+                col + 1,
+                self.heightmap.cols,
+            ),
+            (GridIterDirection::RightToLeft, row, 0, col),
+            (
+                GridIterDirection::TopToBottom,
+                col,
+                row + 1,
+                self.heightmap.rows,
+            ),
+            (GridIterDirection::BottomToTop, col, 0, row),
+        ];
 
-        // Right To Left
-        let mut visible = 0;
-        for c in (0..col).rev() {
-            visible += 1;
-            if self.heightmap[(row, c)] >= tree_height {
-                break;
-            }
-        }
-        scenic_score *= visible;
-
-        // TopToBottom
-        let mut visible = 0;
-        for r in row + 1..self.heightmap.rows {
-            visible += 1;
-            if self.heightmap[(r, col)] >= tree_height {
-                break;
-            }
-        }
-        scenic_score *= visible;
-
-        // BottomToTop
-        let mut visible = 0;
-        for r in (0..row).rev() {
-            visible += 1;
-            if self.heightmap[(r, col)] >= tree_height {
-                break;
-            }
-        }
-        scenic_score *= visible;
-        scenic_score
+        directions
+            .into_iter()
+            .map(|(direction, axis_index, start_bound, end_bound)| {
+                // Flag to check that we need to include the element that is bigger or equal.
+                // once we find one. No fancy itertools iterator exists as of commit time.
+                let mut took_gte_height = false;
+                self.heightmap
+                    .axis_index_iter_with_bounds(axis_index, start_bound, end_bound, &direction)
+                    .take_while(move |index| {
+                        if took_gte_height {
+                            return false;
+                        }
+                        if self.heightmap[*index] >= tree_height {
+                            took_gte_height = true;
+                        }
+                        true
+                    })
+                    .count()
+            })
+            .product()
     }
 
     fn find_highest_scenic_score(&self) -> usize {
-        self.heightmap.index_iter_static_dispatch(&GridIterDirection::RowsLeftToRight)
-        .flat_map(|axis_iter| axis_iter.map(|index| self.get_tree_scenic_score(index.0, index.1)))
-        .max().expect("At least one tree should have the highest scenic score")
+        self.heightmap
+            .index_iter_static_dispatch(&GridIterDirection::LeftToRight)
+            .flat_map(|axis_iter| axis_iter.map(|index| self.get_tree_scenic_score(index)))
+            .max()
+            .expect("At least one tree should have the highest scenic score")
     }
 }
 
