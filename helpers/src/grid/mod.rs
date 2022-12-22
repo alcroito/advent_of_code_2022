@@ -1,20 +1,117 @@
 use std::ops::{Index, IndexMut};
 
-#[derive(Clone, Copy, Debug, derive_more::Display, PartialEq, Eq, Hash, derive_more::From)]
+#[derive(Clone, Copy, Debug, Default, derive_more::Display, PartialEq, Eq, Hash, derive_more::From, derive_more::Into)]
 #[display(fmt = "({}, {})", row, col)]
 pub struct GridPos {
     pub row: usize,
     pub col: usize,
 }
 
-#[derive(Clone, Copy, Debug, derive_more::Display, PartialEq, Eq, Hash, derive_more::From)]
+impl std::ops::Add<GridPosDelta> for GridPos {
+    type Output = GridPos;
+
+    fn add(self, rhs: GridPosDelta) -> Self::Output {
+        let row = (self.row as isize + rhs.row_delta) as usize;
+        let col = (self.col as isize + rhs.col_delta) as usize;
+        (row, col).into()
+    }
+}
+
+impl std::ops::Sub<GridPos> for GridPos {
+    type Output = GridPosDelta;
+
+    fn sub(self, rhs: GridPos) -> Self::Output {
+        let row = self.row as isize - rhs.row as isize;
+        let col = self.col as isize - rhs.col as isize;
+        (row, col).into()
+    }
+}
+
+impl std::ops::AddAssign<GridPosDelta> for GridPos {
+    fn add_assign(&mut self, rhs: GridPosDelta) {
+        *self = *self + rhs;
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, derive_more::Display, PartialEq, Eq, Hash, derive_more::From, derive_more::Into)]
+#[display(fmt = "({}, {})", row, col)]
+pub struct GridPosISize {
+    pub row: isize,
+    pub col: isize,
+}
+
+impl std::ops::Add<GridPosDelta> for GridPosISize {
+    type Output = GridPosISize;
+
+    fn add(self, rhs: GridPosDelta) -> Self::Output {
+        let row = self.row + rhs.row_delta;
+        let col = self.col + rhs.col_delta;
+        (row, col).into()
+    }
+}
+
+impl std::ops::AddAssign<GridPosDelta> for GridPosISize {
+    fn add_assign(&mut self, rhs: GridPosDelta) {
+        *self = *self + rhs;
+    }
+}
+
+#[derive(Clone, Copy, Debug, derive_more::Display, PartialEq, Eq, Hash, derive_more::From, derive_more::Into)]
 #[display(fmt = "({}, {})", row_delta, col_delta)]
 pub struct GridPosDelta {
     pub row_delta: isize,
     pub col_delta: isize,
 }
 
+impl std::ops::Mul<isize> for GridPosDelta {
+    type Output = GridPosDelta;
+
+    fn mul(self, rhs: isize) -> Self::Output {
+        let row = self.row_delta * rhs;
+        let col = self.col_delta * rhs;
+        (row, col).into()
+    }
+}
+
+
 pub type GridBounds = std::ops::Range<usize>;
+
+#[derive(Default, Debug)]
+pub struct GridExtents {
+    pub row_range: std::ops::Range<isize>,
+    pub col_range: std::ops::Range<isize>,
+}
+
+impl GridExtents {
+    pub fn normalized(&self) -> GridExtents {
+        let row_max = self.row_range.start.abs() + self.row_range.end + 1;
+        let col_max = self.col_range.start.abs() + self.col_range.end + 1;
+        GridExtents {
+            row_range: 0..row_max,
+            col_range: 0..col_max,
+        }
+    }
+
+    pub fn normalized_pos(&self, pos: &GridPos) -> GridPos {
+        let row_delta = self.row_range.start.unsigned_abs();
+        let col_delta = self.col_range.start.unsigned_abs();
+        let (row, col) = (*pos).into();
+        (row + row_delta, col + col_delta).into()
+    }
+
+    pub fn compute_grid_extents<I>(iter: I) -> GridExtents
+    where I: Iterator<Item=GridPosISize>
+     {
+        let mut extents = GridExtents::default();
+        iter.for_each(|pos| {
+            extents.row_range.start = extents.row_range.start.min(pos.row);
+            extents.row_range.end = extents.row_range.end.max(pos.row);
+            extents.col_range.start = extents.col_range.start.min(pos.col);
+            extents.col_range.end = extents.col_range.end.max(pos.col);
+        });
+        extents
+    }
+}
 
 #[derive(Clone, Copy, enum_iterator::Sequence, num_enum::IntoPrimitive)]
 #[repr(usize)]
@@ -32,6 +129,44 @@ impl GridIterDirection {
             GridIterDirection::Left => (0, -1),
             GridIterDirection::Down => (1, 0),
             GridIterDirection::Up => (-1, 0),
+        }
+        .into()
+    }
+}
+
+#[derive(Debug, Clone, Copy, enum_iterator::Sequence)]
+pub enum Direction9 {
+    UpLeft,
+    Up,
+    UpRight,
+    Right,
+    DownRight,
+    Down,
+    DownLeft,
+    Left,
+    Center,
+}
+
+impl Direction9 {
+    pub fn iter() -> enum_iterator::All<Direction9> {
+        enum_iterator::all::<Direction9>()
+    }
+
+    pub fn next(&self) -> Option<Self> {
+        enum_iterator::next(self)
+    }
+
+    pub fn delta(&self) -> GridPosDelta {
+        match self {
+            Self::UpLeft => (-1, -1),
+            Self::Up => (-1, 0),
+            Self::UpRight => (-1, 1),
+            Self::Right => (0, 1),
+            Self::DownRight => (1, 1),
+            Self::Down => (1, 0),
+            Self::DownLeft => (1, -1),
+            Self::Left => (0, -1),
+            Self::Center => (0, 0),
         }
         .into()
     }
@@ -61,11 +196,15 @@ where
 }
 
 impl<V> Grid<V> {
-    fn get_element_index(&self, pos: GridPos) -> usize {
+    pub fn get_element_index(&self, pos: GridPos) -> usize {
         pos.row * self.cols + pos.col
     }
+    
+    pub fn get_pos_from_linear_index(&self, index: usize) -> GridPos {
+        GridPos { row: index / self.cols, col: index % self.cols }
+    }
 
-    // Return an pos range (bounds) along an axis, that includes the elements
+    // Return a pos range (bounds) along an axis, that includes the elements
     // starting from (but excluding) origin into the given direction,
     // until the end of the grid.
     pub fn bounds_in_direction_of(

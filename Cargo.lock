@@ -456,6 +456,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "day09"
+version = "0.1.0"
+dependencies = [
+ "aoclib",
+ "color-eyre",
+ "derive_more",
+ "enum-iterator",
+ "error-stack",
+ "helpers",
+ "itertools",
+ "structopt",
+ "tailsome",
+ "thiserror",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"

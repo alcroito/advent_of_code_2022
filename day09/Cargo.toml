@@ -1,0 +1,17 @@
+[package]
+name = "day09"
+version = "0.1.0"
+authors = ["placinta@gmail.com"]
+edition = "2021"
+
+[dependencies]
+aoclib = { git = "https://github.com/coriolinus/aoclib.git" }
+color-eyre = "0.5.10"
+structopt = "0.3.21"
+thiserror = "1.0.22"
+itertools = "0"
+derive_more = "0.99.17"
+tailsome = "0.1.0"
+enum-iterator = "1.2.0"
+helpers = { path = "../helpers" }
+error-stack = "0.2.4"
