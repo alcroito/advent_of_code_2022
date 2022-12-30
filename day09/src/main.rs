@@ -1,5 +1,5 @@
 use aoclib::{config::Config, website::get_input};
-use day09::{part1, part2};
+use day09::{part1, part2, run_gui};
 
 // use color_eyre::eyre::Result;
 use error_stack::{IntoReport, Result, ResultExt};
@@ -54,9 +54,24 @@ fn main() -> Result<(), AppError> {
         let res = part2(&input_path);
         res.change_context(AppError)?;
     }
+
+    let s = "R 4
+U 4
+L 3
+D 1
+R 4
+D 1
+L 5
+R 2";
+    // let s = std::fs::read_to_string(&input_path).unwrap();
+    run_gui(s).change_context(AppError)?;
     Ok(())
 }
 
 #[derive(Debug, thiserror::Error)]
 #[error("App failed")]
 pub struct AppError;
+
+// Disable switching to discrete GPU.
+#[cfg(target_os = "macos")]
+embed_plist::embed_info_plist!("Info.plist");

@@ -15,3 +15,6 @@ tailsome = "0.1.0"
 enum-iterator = "1.2.0"
 helpers = { path = "../helpers" }
 error-stack = "0.2.4"
+eframe = "0.20.1"
+egui = "0.20.1"
+embed_plist = "1.2.2"

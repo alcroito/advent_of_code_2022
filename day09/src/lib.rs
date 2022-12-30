@@ -1,10 +1,14 @@
+use eframe::egui;
 use error_stack::{IntoReport, Report, Result as ESResult, ResultExt};
-#[allow(unused)]
 use helpers::grid::{
     Direction9, Grid, GridExtents, GridIterDirection, GridPos, GridPosDelta, GridPosISize,
 };
 use itertools::Itertools;
-use std::{path::Path, str::FromStr};
+use std::{
+    path::Path,
+    str::FromStr,
+    sync::{Arc, Barrier, Mutex},
+};
 use tailsome::IntoResult;
 
 type StepCount = usize;
@@ -164,7 +168,7 @@ impl Default for Tile {
     }
 }
 
-#[derive(Debug, derive_more::Display)]
+#[derive(Debug, derive_more::Display, Clone)]
 #[display(fmt = "{}", grid)]
 struct RopeSimulation {
     knots: Vec<GridPos>,
@@ -275,6 +279,11 @@ impl RopeSimulation {
         });
     }
 
+    fn simulate_step(&mut self, ops: &Ops, op_index: usize) {
+        let op = &ops[op_index];
+        self.process_op(op);
+    }
+
     fn simulate(&mut self, ops: &Ops) {
         ops.iter().enumerate().for_each(|(_i, op)| {
             self.process_op(op);
@@ -293,14 +302,32 @@ fn compute_grid_extents(ops: &Ops) -> GridExtents {
     }))
 }
 
-fn part_compute(s: &str, knot_count: usize) -> ESResult<usize, PuzzleError> {
+#[derive(Clone)]
+struct RopeSimulationState {
+    simulation: RopeSimulation,
+    ops: Ops,
+    current_op_index: usize,
+}
+
+fn prepare_simulation(s: &str, knot_count: usize) -> ESResult<RopeSimulationState, PuzzleError> {
     let ops = parse_ops(s).change_context(PuzzleError)?;
     let extents = compute_grid_extents(&ops);
     let normalized_extents = extents.normalized();
     let normalized_origin = extents.normalized_pos(&GridPos::default());
-    let single_step_ops = split_ops_in_single_steps(&ops);
-    let mut s = RopeSimulation::new(normalized_origin, &normalized_extents, knot_count);
-    s.simulate(&single_step_ops);
+    let simulation = RopeSimulation::new(normalized_origin, &normalized_extents, knot_count);
+    let ops = split_ops_in_single_steps(&ops);
+    RopeSimulationState {
+        simulation,
+        ops,
+        current_op_index: 0,
+    }
+    .into_ok()
+}
+
+fn part_compute(s: &str, knot_count: usize) -> ESResult<usize, PuzzleError> {
+    let state = prepare_simulation(s, knot_count)?;
+    let (mut s, ops) = (state.simulation, state.ops);
+    s.simulate(&ops);
     s.tail_visited_count().into_ok()
 }
 
@@ -327,6 +354,183 @@ pub fn part2(input: &Path) -> ESResult<(), PuzzleError> {
         .change_context(PuzzleError)?;
     let res = part2_compute(&s)?;
     println!("p2: {}", res);
+    Ok(())
+}
+
+struct GuiState {
+    simulation_state: RopeSimulationState,
+    initial_simulation_state: RopeSimulationState,
+    paused: bool,
+    // steps per frame update tick
+    speed: usize,
+    egui_context: Option<egui::Context>,
+    close_requested: bool,
+}
+
+impl GuiState {
+    fn try_new(input: &str, knot_count: usize) -> ESResult<Self, PuzzleError> {
+        let state = prepare_simulation(input, knot_count)?;
+
+        Self {
+            simulation_state: state.clone(),
+            initial_simulation_state: state,
+            paused: true,
+            speed: 1,
+            egui_context: None,
+            close_requested: false,
+        }
+        .into_ok()
+    }
+}
+
+struct MyApp {
+    state: Arc<Mutex<GuiState>>,
+}
+
+impl MyApp {
+    fn try_new(input: &str, knot_count: usize) -> ESResult<Self, PuzzleError> {
+        let state = GuiState::try_new(input, knot_count)?;
+        let state = Arc::new(Mutex::new(state));
+        Self { state }.into_ok()
+    }
+}
+
+impl MyApp {
+    fn show_panel(&mut self, ctx: &egui::Context) {
+        egui::SidePanel::left("left").show(ctx, |ui| {
+            let mut state = self.state.lock().unwrap();
+            let paused = state.paused;
+
+            if ui.button("Reset").clicked() {
+                state.simulation_state.current_op_index = 0;
+                state.paused = true;
+                state.simulation_state = state.initial_simulation_state.clone();
+            };
+
+            ui.toggle_value(&mut state.paused, {
+                if paused {
+                    "▶️"
+                } else {
+                    "⏸️"
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Speeeed: ");
+                ui.add(egui::Slider::new(&mut state.speed, 1..=20));
+            });
+        });
+    }
+
+    fn update_grid(&mut self, ui: &mut egui::Ui) {
+        let state = self.state.lock().unwrap();
+
+        for row in 0..state.simulation_state.simulation.grid.rows {
+            for col in 0..state.simulation_state.simulation.grid.cols {
+                let pos = (row, col).into();
+                let tile = state.simulation_state.simulation.grid[pos];
+                ui.label(format!("{tile}"));
+            }
+            ui.end_row();
+        }
+    }
+}
+
+impl eframe::App for MyApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.show_panel(ctx);
+
+        // Show the grid model in the gui.
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::Grid::new("grid").show(ui, |ui| {
+                self.update_grid(ui);
+            });
+        });
+
+        ctx.request_repaint_after(std::time::Duration::from_millis(1000));
+    }
+
+    fn on_close_event(&mut self) -> bool {
+        self.state.lock().unwrap().close_requested = true;
+        true
+    }
+}
+
+fn start_simulation_thread(
+    gui_state: Arc<Mutex<GuiState>>,
+    barrier: Arc<Barrier>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        // Wait for egui context to be assigned by gui thread.
+        barrier.wait();
+        let egui_context = gui_state
+            .lock()
+            .unwrap()
+            .egui_context
+            .take()
+            .expect("Expected egui context to exist");
+
+        loop {
+            if gui_state.lock().unwrap().close_requested {
+                break;
+            }
+            let duration = {
+                let gui_state = gui_state.lock().unwrap();
+                (1000 / gui_state.speed) as u64
+            };
+
+            std::thread::sleep(std::time::Duration::from_millis(duration));
+
+            let mut state = gui_state.lock().unwrap();
+            if !state.paused {
+                // Update grid model.
+                state.simulation_state.simulation.update_grid();
+
+                // Simulate next step. Make sure to request repaint one more time
+                // after simulation was finished.
+                if state.simulation_state.current_op_index < state.simulation_state.ops.len() {
+                    if state.simulation_state.current_op_index
+                        < state.simulation_state.ops.len() - 1
+                    {
+                        let ops_copy = state.simulation_state.ops.clone();
+                        let current_op_index = state.simulation_state.current_op_index;
+                        state
+                            .simulation_state
+                            .simulation
+                            .simulate_step(&ops_copy, current_op_index);
+                        state.simulation_state.current_op_index += 1;
+                    }
+                    egui_context.request_repaint();
+                }
+            }
+        }
+    })
+}
+
+pub fn run_gui(input: &str) -> ESResult<(), PuzzleError> {
+    let options = eframe::NativeOptions {
+        initial_window_size: Some(egui::vec2(1024.0, 768.0)),
+        ..Default::default()
+    };
+
+    let app = MyApp::try_new(input, 2)?;
+
+    let barrier = Arc::new(Barrier::new(2));
+
+    let simulation_thread = start_simulation_thread(app.state.clone(), barrier.clone());
+
+    let gui_state = app.state.clone();
+    eframe::run_native(
+        "Advent 2022 Day 09",
+        options,
+        Box::new(move |cc| {
+            let mut state_guard = gui_state.lock().unwrap();
+            state_guard.egui_context = Some(cc.egui_ctx.clone());
+            barrier.wait();
+            Box::new(app)
+        }),
+    );
+    simulation_thread.join().unwrap();
     Ok(())
 }
 
